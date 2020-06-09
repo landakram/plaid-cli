@@ -185,6 +185,7 @@ func main() {
 
 	var fromFlag string
 	var toFlag string
+	var accountID string
 	var outputFormat string
 	transactionsCommand := &cobra.Command{
 		Use:   "transactions [ITEM-ID-OR-ALIAS]",
@@ -199,7 +200,21 @@ func main() {
 
 			err := WithRelinkOnAuthError(itemOrAlias, data, linker, func() error {
 				token := data.Tokens[itemOrAlias]
-				res, err := client.GetTransactions(token, fromFlag, toFlag)
+
+				var accountIDs []string
+				if len(accountID) > 0 {
+					accountIDs = append(accountIDs, accountID)
+				}
+
+				options := plaid.GetTransactionsOptions{
+					StartDate:  fromFlag,
+					EndDate:    toFlag,
+					AccountIDs: accountIDs,
+					Count:      100,
+					Offset:     0,
+				}
+
+				res, err := client.GetTransactionsWithOptions(token, options)
 				if err != nil {
 					return err
 				}
@@ -233,6 +248,8 @@ func main() {
 	transactionsCommand.MarkFlagRequired("to")
 
 	transactionsCommand.Flags().StringVarP(&outputFormat, "output-format", "o", "json", "Output format")
+
+	transactionsCommand.Flags().StringVarP(&accountID, "account-id", "a", "", "Fetch transactions for this account ID only.")
 
 	rootCommand := &cobra.Command{Use: "plaid-cli"}
 	rootCommand.AddCommand(linkCommand)
