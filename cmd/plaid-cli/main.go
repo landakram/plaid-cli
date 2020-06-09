@@ -79,7 +79,16 @@ func main() {
 		Use:   "tokens",
 		Short: "List tokens",
 		Run: func(cmd *cobra.Command, args []string) {
-			printJSON, err := json.MarshalIndent(data.Tokens, "", "  ")
+			resolved := make(map[string]string)
+			for itemID, token := range data.Tokens {
+				if alias, ok := data.BackAliases[itemID]; ok {
+					resolved[alias] = token
+				} else {
+					resolved[itemID] = token
+				}
+			}
+
+			printJSON, err := json.MarshalIndent(resolved, "", "  ")
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -100,6 +109,7 @@ func main() {
 			}
 
 			data.Aliases[name] = itemID
+			data.BackAliases[itemID] = name
 			err = data.Save()
 			if err != nil {
 				log.Fatalln(err)

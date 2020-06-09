@@ -8,16 +8,18 @@ import (
 )
 
 type Data struct {
-	DataDir string
-	Tokens  map[string]string
-	Aliases map[string]string
+	DataDir     string
+	Tokens      map[string]string
+	Aliases     map[string]string
+	BackAliases map[string]string
 }
 
 func LoadData(dataDir string) *Data {
 	os.MkdirAll(filepath.Join(dataDir, "data"), os.ModePerm)
 
 	data := &Data{
-		DataDir: dataDir,
+		DataDir:     dataDir,
+		BackAliases: make(map[string]string),
 	}
 	data.loadTokens()
 	data.loadAliases()
@@ -34,6 +36,10 @@ func (d *Data) loadAliases() error {
 
 	d.Aliases = aliases
 
+	for alias, itemID := range aliases {
+		d.BackAliases[itemID] = alias
+	}
+
 	return nil
 }
 
@@ -46,7 +52,7 @@ func (d *Data) aliasesPath() string {
 }
 
 func (d *Data) loadTokens() error {
-	var tokens map[string]string
+	var tokens map[string]string = make(map[string]string)
 	filePath := d.tokensPath()
 	err := load(filePath, &tokens)
 	if err != nil {
