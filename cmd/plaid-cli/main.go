@@ -16,6 +16,8 @@ import (
 )
 
 func main() {
+	log.SetFlags(0)
+
 	usr, _ := user.Current()
 	dir := usr.HomeDir
 	viper.SetDefault("cli.data_dir", filepath.Join(dir, ".plaid-cli"))
@@ -79,7 +81,7 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			printJSON, err := json.MarshalIndent(data.Tokens, "", "  ")
 			if err != nil {
-				log.Fatal(err)
+				log.Fatalln(err)
 			}
 			fmt.Println(string(printJSON))
 		},
@@ -92,6 +94,10 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			itemID := args[0]
 			name := args[1]
+
+			if _, ok := data.Tokens[itemID]; !ok {
+				log.Fatalf("No access token found for item ID `%s`. Try re-linking your account with `plaid-cli link`.\n", itemID)
+			}
 
 			data.Aliases[name] = itemID
 			err = data.Save()
@@ -107,7 +113,7 @@ func main() {
 		Run: func(cmd *cobra.Command, args []string) {
 			printJSON, err := json.MarshalIndent(data.Aliases, "", "  ")
 			if err != nil {
-				log.Fatal(err)
+				log.Fatalln(err)
 			}
 			fmt.Println(string(printJSON))
 		},
