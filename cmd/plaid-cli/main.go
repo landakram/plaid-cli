@@ -54,15 +54,31 @@ func main() {
 		log.Fatal(err)
 	}
 
-	linker := plaid_cli.NewLinker(client)
+	linker := plaid_cli.NewLinker(data, client)
 
 	linkCommand := &cobra.Command{
-		Use:   "link",
+		Use:   "link [ITEM-ID-OR-ALIAS]",
 		Short: "Link a bank account so plaid-cli can pull transactions.",
+		Long:  "Link a bank account so plaid-cli can pull transactions. An item ID or alias can be passed to initiate a relink.",
+		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
+			itemOrAlias := args[0]
+
 			port := viper.GetString("link.port")
 
-			tokenPair, err := linker.Link(port)
+			var tokenPair *plaid_cli.TokenPair
+			var err error
+
+			if len(itemOrAlias) > 0 {
+				itemID, ok := data.Aliases[itemOrAlias]
+				if ok {
+					itemOrAlias = itemID
+				}
+
+				tokenPair, err = linker.Relink(itemOrAlias, port)
+			} else {
+				tokenPair, err = linker.Link(port)
+			}
 
 			data.Tokens[tokenPair.ItemID] = tokenPair.AccessToken
 			err = data.Save()
@@ -129,10 +145,40 @@ func main() {
 		},
 	}
 
+	var fromFlag string
+	var toFlag string
+	transactionsCommand := &cobra.Command{
+		Use:   "transactions [ITEM-ID-OR-ALIAS]",
+		Short: "List transactions for a given account",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			itemOrAlias := args[0]
+			itemID, ok := data.Aliases[itemOrAlias]
+			if ok {
+				itemOrAlias = itemID
+			}
+
+			token := data.Tokens[itemOrAlias]
+			res, err := client.GetTransactions(token, fromFlag, toFlag)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			output, err := json.MarshalIndent(res, "", "  ")
+			fmt.Println(string(output))
+		},
+	}
+	transactionsCommand.Flags().StringVarP(&fromFlag, "from", "f", "", "Date on first transaction (required)")
+	transactionsCommand.MarkFlagRequired("from")
+
+	transactionsCommand.Flags().StringVarP(&toFlag, "to", "t", "", "Date on first transaction (required)")
+	transactionsCommand.MarkFlagRequired("to")
+
 	rootCommand := &cobra.Command{Use: "plaid-cli"}
 	rootCommand.AddCommand(linkCommand)
 	rootCommand.AddCommand(tokensCommand)
 	rootCommand.AddCommand(aliasCommand)
 	rootCommand.AddCommand(aliasesCommand)
+	rootCommand.AddCommand(transactionsCommand)
 	rootCommand.Execute()
 }
