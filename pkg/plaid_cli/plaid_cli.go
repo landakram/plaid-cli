@@ -7,14 +7,9 @@ import (
 	"path/filepath"
 )
 
-type TokenPair struct {
-	ItemID      string `json:"item_id"`
-	AccessToken string `json:"access_token"`
-}
-
 type Data struct {
 	DataDir string
-	Tokens  []TokenPair
+	Tokens  map[string]string
 	Aliases map[string]string
 }
 
@@ -51,7 +46,7 @@ func (d *Data) aliasesPath() string {
 }
 
 func (d *Data) loadTokens() error {
-	var tokens []TokenPair
+	var tokens map[string]string
 	filePath := d.tokensPath()
 	err := load(filePath, &tokens)
 	if err != nil {
