@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"os/user"
 	"path/filepath"
 
+	"github.com/landakram/plaid-cli/pkg/plaid_cli"
 	"github.com/plaid/plaid-go/plaid"
 	"github.com/skratchdot/open-golang/open"
 	"github.com/spf13/cobra"
+
 	"github.com/spf13/viper"
 )
 
@@ -21,11 +21,6 @@ type Linker struct {
 	Results chan string
 	Errors  chan error
 	Client  *plaid.Client
-}
-
-type TokenPair struct {
-	ItemID      string `json:"item_id"`
-	AccessToken string `json:"access_token"`
 }
 
 func (l *Linker) Link(publicToken string) (plaid.ExchangePublicTokenResponse, error) {
@@ -38,7 +33,7 @@ func main() {
 	viper.SetDefault("cli.data_dir", filepath.Join(dir, ".plaid-cli"))
 
 	dataDir := viper.GetString("cli.data_dir")
-	os.MkdirAll(filepath.Join(dataDir, "data"), os.ModePerm)
+	data := plaid_cli.LoadData(dataDir)
 
 	viper.SetConfigName("config")
 	viper.SetConfigType("toml")
@@ -98,33 +93,15 @@ func main() {
 					log.Fatal(err)
 				}
 
-				pair := TokenPair{
+				pair := plaid_cli.TokenPair{
 					ItemID:      res.ItemID,
 					AccessToken: res.AccessToken,
 				}
 
-				var tokens []TokenPair
-				filePath := filepath.Join(dataDir, "data", "tokens.json")
-				f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0755)
-				defer f.Close()
-
+				data.Tokens = append(data.Tokens, pair)
+				err = data.Save()
 				if err != nil {
-					fmt.Println(err)
-				} else {
-					b, err := ioutil.ReadAll(f)
-					if err != nil {
-						fmt.Println(err)
-					}
-
-					_ = json.Unmarshal(b, &tokens)
-				}
-				tokens = append(tokens, pair)
-
-				tokensJson, err := json.Marshal(tokens)
-				if err != nil {
-					fmt.Println(err)
-				} else {
-					f.Write(tokensJson)
+					log.Fatalln(err)
 				}
 			}
 		},
@@ -141,29 +118,10 @@ func main() {
 			itemID := args[0]
 			name := args[1]
 
-			var aliases map[string]string = make(map[string]string)
-			filePath := filepath.Join(dataDir, "data", "aliases.json")
-			f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0755)
-			defer f.Close()
-
+			data.Aliases[name] = itemID
+			err = data.Save()
 			if err != nil {
-				fmt.Println(err)
-			} else {
-				b, err := ioutil.ReadAll(f)
-				if err != nil {
-					fmt.Println(err)
-				}
-
-				_ = json.Unmarshal(b, &aliases)
-			}
-
-			aliases[name] = itemID
-
-			aliasesJson, err := json.Marshal(aliases)
-			if err != nil {
-				fmt.Println(err)
-			} else {
-				f.Write(aliasesJson)
+				log.Fatalln(err)
 			}
 		},
 	}
@@ -172,23 +130,7 @@ func main() {
 		Use:   "aliases",
 		Short: "List aliases",
 		Run: func(cmd *cobra.Command, args []string) {
-			var aliases map[string]string = make(map[string]string)
-			filePath := filepath.Join(dataDir, "data", "aliases.json")
-			f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0755)
-			defer f.Close()
-
-			if err != nil {
-				fmt.Println(err)
-			} else {
-				b, err := ioutil.ReadAll(f)
-				if err != nil {
-					fmt.Println(err)
-				}
-
-				_ = json.Unmarshal(b, &aliases)
-			}
-
-			printJSON, err := json.MarshalIndent(aliases, "", "  ")
+			printJSON, err := json.MarshalIndent(data.Aliases, "", "  ")
 			if err != nil {
 				log.Fatal(err)
 			}
