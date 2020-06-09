@@ -133,8 +133,73 @@ func main() {
 	linkCommand.Flags().StringP("port", "p", "8080", "Port on which to serve Plaid Link")
 	viper.BindPFlag("link.port", linkCommand.Flags().Lookup("port"))
 
+	aliasCommand := &cobra.Command{
+		Use:   "alias [ITEM-ID] [NAME]",
+		Short: "Give a linked bank account a name.",
+		Args:  cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			itemID := args[0]
+			name := args[1]
+
+			var aliases map[string]string = make(map[string]string)
+			filePath := filepath.Join(dataDir, "data", "aliases.json")
+			f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0755)
+			defer f.Close()
+
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				b, err := ioutil.ReadAll(f)
+				if err != nil {
+					fmt.Println(err)
+				}
+
+				_ = json.Unmarshal(b, &aliases)
+			}
+
+			aliases[name] = itemID
+
+			aliasesJson, err := json.Marshal(aliases)
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				f.Write(aliasesJson)
+			}
+		},
+	}
+
+	aliasesCommand := &cobra.Command{
+		Use:   "aliases",
+		Short: "List aliases",
+		Run: func(cmd *cobra.Command, args []string) {
+			var aliases map[string]string = make(map[string]string)
+			filePath := filepath.Join(dataDir, "data", "aliases.json")
+			f, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0755)
+			defer f.Close()
+
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				b, err := ioutil.ReadAll(f)
+				if err != nil {
+					fmt.Println(err)
+				}
+
+				_ = json.Unmarshal(b, &aliases)
+			}
+
+			printJSON, err := json.MarshalIndent(aliases, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println(string(printJSON))
+		},
+	}
+
 	rootCommand := &cobra.Command{Use: "plaid-cli"}
 	rootCommand.AddCommand(linkCommand)
+	rootCommand.AddCommand(aliasCommand)
+	rootCommand.AddCommand(aliasesCommand)
 	rootCommand.Execute()
 }
 
