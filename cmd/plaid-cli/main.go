@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os/user"
 	"path/filepath"
+	"strings"
 
 	"github.com/landakram/plaid-cli/pkg/plaid_cli"
 	"github.com/plaid/plaid-go/plaid"
@@ -147,6 +151,7 @@ func main() {
 
 	var fromFlag string
 	var toFlag string
+	var outputFormat string
 	transactionsCommand := &cobra.Command{
 		Use:   "transactions [ITEM-ID-OR-ALIAS]",
 		Short: "List transactions for a given account",
@@ -164,15 +169,27 @@ func main() {
 				log.Fatalln(err)
 			}
 
-			output, err := json.MarshalIndent(res, "", "  ")
-			fmt.Println(string(output))
+			// TODO: Handle pagination
+
+			serializer, err := NewTransactionSerializer(outputFormat)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			b, err := serializer.serialize(res.Transactions)
+			if err != nil {
+				log.Fatalln(err)
+			}
+			fmt.Println(string(b))
 		},
 	}
-	transactionsCommand.Flags().StringVarP(&fromFlag, "from", "f", "", "Date on first transaction (required)")
+	transactionsCommand.Flags().StringVarP(&fromFlag, "from", "f", "", "Date of first transaction (required)")
 	transactionsCommand.MarkFlagRequired("from")
 
-	transactionsCommand.Flags().StringVarP(&toFlag, "to", "t", "", "Date on first transaction (required)")
+	transactionsCommand.Flags().StringVarP(&toFlag, "to", "t", "", "Date of last transaction (required)")
 	transactionsCommand.MarkFlagRequired("to")
+
+	transactionsCommand.Flags().StringVarP(&outputFormat, "output-format", "o", "json", "Output format")
 
 	rootCommand := &cobra.Command{Use: "plaid-cli"}
 	rootCommand.AddCommand(linkCommand)
@@ -181,4 +198,48 @@ func main() {
 	rootCommand.AddCommand(aliasesCommand)
 	rootCommand.AddCommand(transactionsCommand)
 	rootCommand.Execute()
+}
+
+type TransactionSerializer interface {
+	serialize(txs []plaid.Transaction) ([]byte, error)
+}
+
+func NewTransactionSerializer(t string) (TransactionSerializer, error) {
+	switch t {
+	case "csv":
+		return &CSVSerializer{}, nil
+	case "json":
+		return &JSONSerializer{}, nil
+	default:
+		return nil, errors.New(fmt.Sprintf("Invalid format: %s", t))
+	}
+}
+
+type CSVSerializer struct{}
+
+func (w *CSVSerializer) serialize(txs []plaid.Transaction) ([]byte, error) {
+	var records [][]string
+	for _, tx := range txs {
+		sanitizedName := strings.ReplaceAll(tx.Name, ",", "")
+		records = append(records, []string{tx.Date, fmt.Sprintf("%f", tx.Amount), sanitizedName})
+	}
+
+	b := bytes.NewBufferString("")
+	writer := csv.NewWriter(b)
+	err := writer.Write([]string{"Date", "Amount", "Description"})
+	if err != nil {
+		return nil, err
+	}
+	err = writer.WriteAll(records)
+	if err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), err
+}
+
+type JSONSerializer struct{}
+
+func (w *JSONSerializer) serialize(txs []plaid.Transaction) ([]byte, error) {
+	return json.MarshalIndent(txs, "", "  ")
 }
