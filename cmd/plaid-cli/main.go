@@ -214,19 +214,17 @@ func main() {
 					Offset:     0,
 				}
 
-				res, err := client.GetTransactionsWithOptions(token, options)
+				transactions, err := AllTransactions(options, client, token)
 				if err != nil {
 					return err
 				}
-
-				// TODO: Handle pagination
 
 				serializer, err := NewTransactionSerializer(outputFormat)
 				if err != nil {
 					return err
 				}
 
-				b, err := serializer.serialize(res.Transactions)
+				b, err := serializer.serialize(transactions)
 				if err != nil {
 					return err
 				}
@@ -248,7 +246,6 @@ func main() {
 	transactionsCommand.MarkFlagRequired("to")
 
 	transactionsCommand.Flags().StringVarP(&outputFormat, "output-format", "o", "json", "Output format")
-
 	transactionsCommand.Flags().StringVarP(&accountID, "account-id", "a", "", "Fetch transactions for this account ID only.")
 
 	rootCommand := &cobra.Command{Use: "plaid-cli"}
@@ -259,6 +256,30 @@ func main() {
 	rootCommand.AddCommand(accountsCommand)
 	rootCommand.AddCommand(transactionsCommand)
 	rootCommand.Execute()
+}
+
+func AllTransactions(opts plaid.GetTransactionsOptions, client *plaid.Client, token string) ([]plaid.Transaction, error) {
+	var transactions []plaid.Transaction
+
+	res, err := client.GetTransactionsWithOptions(token, opts)
+	if err != nil {
+		return transactions, err
+	}
+
+	transactions = append(transactions, res.Transactions...)
+
+	for len(transactions) < res.TotalTransactions {
+		opts.Offset += opts.Count
+		res, err := client.GetTransactionsWithOptions(token, opts)
+		if err != nil {
+			return transactions, err
+		}
+
+		transactions = append(transactions, res.Transactions...)
+
+	}
+
+	return transactions, nil
 }
 
 func WithRelinkOnAuthError(itemID string, data *plaid_cli.Data, linker *plaid_cli.Linker, action func() error) error {
