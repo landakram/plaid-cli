@@ -3,6 +3,7 @@ package plaid_cli
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"text/template"
 
@@ -37,7 +38,7 @@ func (l *Linker) Link(port string) (*TokenPair, error) {
 }
 
 func (l *Linker) link(port string, serveLink func(w http.ResponseWriter, r *http.Request)) (*TokenPair, error) {
-	fmt.Println(fmt.Sprintf("Starting Plaid Link on port %s", port))
+	log.Println(fmt.Sprintf("Starting Plaid Link on port %s", port))
 	go func() {
 		http.HandleFunc("/link", serveLink)
 		err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil)

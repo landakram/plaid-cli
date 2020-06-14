@@ -66,14 +66,15 @@ func main() {
 		Long:  "Link a bank account so plaid-cli can pull transactions. An item ID or alias can be passed to initiate a relink.",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			itemOrAlias := args[0]
-
 			port := viper.GetString("link.port")
 
 			var tokenPair *plaid_cli.TokenPair
+
 			var err error
 
-			if len(itemOrAlias) > 0 {
+			if len(args) > 0 && len(args[0]) > 0 {
+				itemOrAlias := args[0]
+
 				itemID, ok := data.Aliases[itemOrAlias]
 				if ok {
 					itemOrAlias = itemID
