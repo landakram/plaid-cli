@@ -64,8 +64,8 @@ func main() {
 
 	linkCommand := &cobra.Command{
 		Use:   "link [ITEM-ID-OR-ALIAS]",
-		Short: "Link a bank account so plaid-cli can pull transactions.",
-		Long:  "Link a bank account so plaid-cli can pull transactions. An item ID or alias can be passed to initiate a relink.",
+		Short: "Link an institution so plaid-cli can pull transactions",
+		Long:  "Link an institution so plaid-cli can pull transactions. An item ID or alias can be passed to initiate a relink.",
 		Args:  cobra.MaximumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			port := viper.GetString("link.port")
@@ -139,7 +139,7 @@ func main() {
 
 	tokensCommand := &cobra.Command{
 		Use:   "tokens",
-		Short: "List tokens",
+		Short: "List access tokens",
 		Run: func(cmd *cobra.Command, args []string) {
 			resolved := make(map[string]string)
 			for itemID, token := range data.Tokens {
@@ -160,7 +160,7 @@ func main() {
 
 	aliasCommand := &cobra.Command{
 		Use:   "alias [ITEM-ID] [NAME]",
-		Short: "Give a linked institution a friendly name.",
+		Short: "Give a linked institution a friendly name",
 		Long:  "Give a linked institution a friendly name. You can use this name instead of the idem ID in most commands.",
 		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -189,6 +189,7 @@ func main() {
 	accountsCommand := &cobra.Command{
 		Use:   "accounts [ITEM-ID-OR-ALIAS]",
 		Short: "List accounts for a given institution",
+		Long:  "List accounts for a given institution. An account ID returned from this command can be used as a filter when listing transactions.",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			itemOrAlias := args[0]
@@ -226,7 +227,7 @@ func main() {
 	var outputFormat string
 	transactionsCommand := &cobra.Command{
 		Use:   "transactions [ITEM-ID-OR-ALIAS]",
-		Short: "List transactions for a given account",
+		Short: "List transactions for a given institution",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			itemOrAlias := args[0]
