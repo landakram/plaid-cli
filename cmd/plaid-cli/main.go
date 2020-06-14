@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/landakram/plaid-cli/pkg/plaid_cli"
+	"github.com/manifoldco/promptui"
 	"github.com/plaid/plaid-go/plaid"
 	"github.com/spf13/cobra"
 
@@ -90,6 +92,45 @@ func main() {
 			if err != nil {
 				log.Fatalln(err)
 			}
+
+			log.Println("Institution linked!")
+			log.Println(fmt.Sprintf("Item ID: %s", tokenPair.ItemID))
+
+			if alias, ok := data.BackAliases[tokenPair.ItemID]; ok {
+				log.Println(fmt.Sprintf("Alias: %s", alias))
+				return
+			}
+
+			validate := func(input string) error {
+				matched, err := regexp.Match(`^\w+$`, []byte(input))
+				if err != nil {
+					return err
+				}
+
+				if !matched && input != "" {
+					return errors.New("Valid characters: [0-9A-Za-z_]")
+				}
+
+				return nil
+			}
+
+			log.Println("You can give the institution a friendly alias and use that instead of the item ID in most commands.")
+			prompt := promptui.Prompt{
+				Label:    "Alias (default: none)",
+				Validate: validate,
+			}
+
+			input, err := prompt.Run()
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			if input != "" {
+				err = SetAlias(data, tokenPair.ItemID, input)
+				if err != nil {
+					log.Fatalln(err)
+				}
+			}
 		},
 	}
 
@@ -119,19 +160,14 @@ func main() {
 
 	aliasCommand := &cobra.Command{
 		Use:   "alias [ITEM-ID] [NAME]",
-		Short: "Give a linked bank account a name.",
+		Short: "Give a linked institution a friendly name.",
+		Long:  "Give a linked institution a friendly name. You can use this name instead of the idem ID in most commands.",
 		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
 			itemID := args[0]
-			name := args[1]
+			alias := args[1]
 
-			if _, ok := data.Tokens[itemID]; !ok {
-				log.Fatalf("No access token found for item ID `%s`. Try re-linking your account with `plaid-cli link`.\n", itemID)
-			}
-
-			data.Aliases[name] = itemID
-			data.BackAliases[itemID] = name
-			err = data.Save()
+			err := SetAlias(data, itemID, alias)
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -348,6 +384,23 @@ func (w *CSVSerializer) serialize(txs []plaid.Transaction) ([]byte, error) {
 	}
 
 	return b.Bytes(), err
+}
+
+func SetAlias(data *plaid_cli.Data, itemID string, alias string) error {
+	if _, ok := data.Tokens[itemID]; !ok {
+		return errors.New(fmt.Sprintf("No access token found for item ID `%s`. Try re-linking your account with `plaid-cli link`.", itemID))
+	}
+
+	data.Aliases[alias] = itemID
+	data.BackAliases[itemID] = alias
+	err := data.Save()
+	if err != nil {
+		return err
+	}
+
+	log.Println(fmt.Sprintf("Aliased %s to %s.", itemID, alias))
+
+	return nil
 }
 
 type JSONSerializer struct{}
