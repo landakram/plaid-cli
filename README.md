@@ -7,6 +7,16 @@ plaid-cli is a CLI tool for working with the Plaid API.
 You can use plaid-cli to link bank accounts and pull transactions in multiple 
 output formats from the comfort of the command line.
 
+## Installation
+
+Install with `go get`:
+
+```sh
+go get github.com/landakram/plaid-cli
+```
+
+Or grab a binary for your platform from the [Releases](https://github.com/landakram/plaid-cli/releases) page.
+
 ## Configuration
 
 To get started, you'll need Plaid API credentials, which you can get by visiting
