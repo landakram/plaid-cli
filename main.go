@@ -76,7 +76,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	linker := plaid_cli.NewLinker(data, client)
+	linker := plaid_cli.NewLinker(data, client, opts)
 
 	linkCommand := &cobra.Command{
 		Use:   "link [ITEM-ID-OR-ALIAS]",
