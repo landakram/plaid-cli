@@ -1,6 +1,41 @@
-# plaid-cli
+# plaid-cli 🤑
 
 > Link accounts and get transactions from the command line.
+
+plaid-cli is a CLI tool for working with the Plaid API.
+
+You can use plaid-cli to link bank accounts and pull transactions in multiple 
+output formats from the comfort of the command line.
+
+## Configuration
+
+To get started, you'll need Plaid API credentials, which you can get by visiting
+https://dashboard.plaid.com/team/keys after signing up for free.
+
+plaid-cli will look at the following environment variables for API credentials:
+
+```sh
+PLAID_CLIENT_ID=<client id>
+PLAID_PUBLIC_KEY=<public key>
+PLAID_SECRET=<devlopment secret>
+PLAID_ENVIRONMENT=development
+```
+
+I recommend setting and exporting these on shell startup.
+
+API credentials can also be specified using a config file located at
+~/.plaid-cli/config.toml:
+
+```toml
+[plaid]
+client_id = "<client id>"
+public_key = "<public key>"
+secret = "<development secret>"
+environment = "development"
+```
+
+After setting those API credentials, plaid-cli is ready to use!
+You'll probably want to run 'plaid-cli link' next.
 
 ## Usage 
 

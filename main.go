@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -44,13 +45,28 @@ func main() {
 		}
 	}
 
+	viper.SetEnvPrefix("")
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_", ".", "_"))
 	viper.AutomaticEnv()
+
+	viper.SetDefault("plaid.environment", "development")
+	plaidEnvStr := strings.ToLower(viper.GetString("plaid.environment"))
+
+	var plaidEnv plaid.Environment
+	switch plaidEnvStr {
+	case "development":
+		plaidEnv = plaid.Development
+	case "production":
+		plaidEnv = plaid.Production
+	default:
+		log.Fatalln("Invalid plaid environment. Valid plaid environments are 'development' or 'production'.")
+	}
 
 	opts := plaid.ClientOptions{
 		viper.GetString("plaid.client_id"),
 		viper.GetString("plaid.secret"),
 		viper.GetString("plaid.public_key"),
-		plaid.Development,
+		plaidEnv,
 		&http.Client{},
 	}
 
@@ -286,13 +302,70 @@ func main() {
 	transactionsCommand.Flags().StringVarP(&outputFormat, "output-format", "o", "json", "Output format")
 	transactionsCommand.Flags().StringVarP(&accountID, "account-id", "a", "", "Fetch transactions for this account ID only.")
 
-	rootCommand := &cobra.Command{Use: "plaid-cli"}
+	rootCommand := &cobra.Command{
+		Use:   "plaid-cli",
+		Short: "Link bank accounts and get transactions from the command line.",
+		Long: `plaid-cli 🤑
+
+plaid-cli is a CLI tool for working with the Plaid API.
+
+You can use plaid-cli to link bank accounts and pull transactions in multiple 
+output formats from the comfort of the command line.
+
+Configuration:
+  To get started, you'll need Plaid API credentials, which you can get by visiting
+  https://dashboard.plaid.com/team/keys after signing up for free.
+  
+  plaid-cli will look at the following environment variables for API credentials:
+  
+    PLAID_CLIENT_ID=<client id>
+    PLAID_PUBLIC_KEY=<public key>
+    PLAID_SECRET=<devlopment secret>
+    PLAID_ENVIRONMENT=development
+  
+  I recommend setting and exporting these on shell startup.
+  
+  API credentials can also be specified using a config file located at 
+  ~/.plaid-cli/config.toml:
+  
+    [plaid]
+    client_id = "<client id>"
+    public_key = "<public key>"
+    secret = "<development secret>"
+    environment = "development"
+  
+  After setting those API credentials, plaid-cli is ready to use! 
+  You'll probably want to run 'plaid-cli link' next.
+  
+  Please see the README (https://github.com/landakram/plaid-cli/blob/master/README.md) 
+  for more detailed usage instructions.
+
+  Made by @landakram.
+`,
+	}
 	rootCommand.AddCommand(linkCommand)
 	rootCommand.AddCommand(tokensCommand)
 	rootCommand.AddCommand(aliasCommand)
 	rootCommand.AddCommand(aliasesCommand)
 	rootCommand.AddCommand(accountsCommand)
 	rootCommand.AddCommand(transactionsCommand)
+
+	if !viper.IsSet("plaid.client_id") {
+		log.Println("⚠️  PLAID_CLIENT_ID not set. Please see the configuration instructions below.")
+		rootCommand.Help()
+		os.Exit(1)
+	}
+	if !viper.IsSet("plaid.secret") {
+		log.Println("⚠️ PLAID_SECRET not set. Please see the configuration instructions below.")
+		rootCommand.Help()
+		os.Exit(1)
+	}
+	if !viper.IsSet("plaid.public_key") {
+		log.Println("⚠️ PLAID_PUBLIC_KEY not set. Please see the configuration instructions below.")
+		rootCommand.Help()
+		os.Exit(1)
+	}
+
 	rootCommand.Execute()
 }
 
