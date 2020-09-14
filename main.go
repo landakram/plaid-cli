@@ -30,13 +30,17 @@ func main() {
 	viper.SetDefault("cli.data_dir", filepath.Join(dir, ".plaid-cli"))
 
 	dataDir := viper.GetString("cli.data_dir")
-	data := plaid_cli.LoadData(dataDir)
+	data, err := plaid_cli.LoadData(dataDir)
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	viper.SetConfigName("config")
 	viper.SetConfigType("toml")
 	viper.AddConfigPath(dataDir)
 	viper.AddConfigPath(".")
-	err := viper.ReadInConfig()
+	err = viper.ReadInConfig()
 	if err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			// Config file not found; ignore error if desired

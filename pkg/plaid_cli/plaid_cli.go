@@ -3,6 +3,7 @@ package plaid_cli
 import (
 	"encoding/json"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -14,24 +15,26 @@ type Data struct {
 	BackAliases map[string]string
 }
 
-func LoadData(dataDir string) *Data {
+func LoadData(dataDir string) (*Data, error) {
 	os.MkdirAll(filepath.Join(dataDir, "data"), os.ModePerm)
 
 	data := &Data{
 		DataDir:     dataDir,
 		BackAliases: make(map[string]string),
 	}
+
 	data.loadTokens()
 	data.loadAliases()
-	return data
+
+	return data, nil
 }
 
-func (d *Data) loadAliases() error {
+func (d *Data) loadAliases() {
 	var aliases map[string]string = make(map[string]string)
 	filePath := d.aliasesPath()
 	err := load(filePath, &aliases)
 	if err != nil {
-		return err
+		log.Printf("Error loading aliases from %s. Assuming empty tokens. Error: %s", d.aliasesPath(), err)
 	}
 
 	d.Aliases = aliases
@@ -39,8 +42,6 @@ func (d *Data) loadAliases() error {
 	for alias, itemID := range aliases {
 		d.BackAliases[itemID] = alias
 	}
-
-	return nil
 }
 
 func (d *Data) tokensPath() string {
@@ -51,17 +52,15 @@ func (d *Data) aliasesPath() string {
 	return filepath.Join(d.DataDir, "data", "aliases.json")
 }
 
-func (d *Data) loadTokens() error {
+func (d *Data) loadTokens() {
 	var tokens map[string]string = make(map[string]string)
 	filePath := d.tokensPath()
 	err := load(filePath, &tokens)
 	if err != nil {
-		return err
+		log.Printf("Error loading tokens from %s. Assuming empty tokens. Error: %s", d.tokensPath(), err)
 	}
 
 	d.Tokens = tokens
-
-	return nil
 }
 
 func load(filePath string, v interface{}) error {
