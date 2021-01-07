@@ -306,6 +306,57 @@ func main() {
 	transactionsCommand.Flags().StringVarP(&outputFormat, "output-format", "o", "json", "Output format")
 	transactionsCommand.Flags().StringVarP(&accountID, "account-id", "a", "", "Fetch transactions for this account ID only.")
 
+	var withStatusFlag bool
+	var withOptionalMetadataFlag bool
+	insitutionCommand := &cobra.Command{
+		Use:   "institution [ITEM-ID-OR-ALIAS]",
+		Short: "Get information about an institution",
+		Long:  "Get information about an institution. Status can be reported using a flag.",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			itemOrAlias := args[0]
+			itemID, ok := data.Aliases[itemOrAlias]
+			if ok {
+				itemOrAlias = itemID
+			}
+
+			err := WithRelinkOnAuthError(itemOrAlias, data, linker, func() error {
+				token := data.Tokens[itemOrAlias]
+
+				itemResp, err := client.GetItem(token)
+				if err != nil {
+					return err
+				}
+
+				instID := itemResp.Item.InstitutionID
+
+				opts := plaid.GetInstitutionByIDOptions{
+					IncludeOptionalMetadata: withOptionalMetadataFlag,
+					IncludeStatus:           withStatusFlag,
+				}
+				resp, err := client.GetInstitutionByIDWithOptions(instID, opts)
+				if err != nil {
+					return err
+				}
+
+				b, err := json.MarshalIndent(resp.Institution, "", "  ")
+				if err != nil {
+					return err
+				}
+
+				fmt.Println(string(b))
+
+				return nil
+			})
+
+			if err != nil {
+				log.Fatalln(err)
+			}
+		},
+	}
+	insitutionCommand.Flags().BoolVarP(&withStatusFlag, "status", "s", false, "Fetch institution status")
+	insitutionCommand.Flags().BoolVarP(&withOptionalMetadataFlag, "optional-metadata", "m", false, "Fetch optional metadata like logo and URL")
+
 	rootCommand := &cobra.Command{
 		Use:   "plaid-cli",
 		Short: "Link bank accounts and get transactions from the command line.",
@@ -353,6 +404,7 @@ Configuration:
 	rootCommand.AddCommand(aliasesCommand)
 	rootCommand.AddCommand(accountsCommand)
 	rootCommand.AddCommand(transactionsCommand)
+	rootCommand.AddCommand(insitutionCommand)
 
 	if !viper.IsSet("plaid.client_id") {
 		log.Println("⚠️  PLAID_CLIENT_ID not set. Please see the configuration instructions below.")
