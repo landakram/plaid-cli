@@ -20,7 +20,38 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/spf13/viper"
+
+	"github.com/Xuanwo/go-locale"
+	"golang.org/x/text/language"
 )
+
+func sliceToMap(slice []string) map[string]bool {
+	set := make(map[string]bool, len(slice))
+	for _, s := range slice {
+		set[s] = true
+	}
+	return set
+}
+
+// See https://plaid.com/docs/link/customization/#language-and-country
+var plaidSupportedCountries = []string{"US", "CA", "GB", "IE", "ES", "FR", "NL"}
+var plaidSupportedLanguages = []string{"en", "fr", "es", "nl"}
+
+func AreValidCountries(countries []string) bool {
+	supportedCountries := sliceToMap(plaidSupportedCountries)
+	for _, c := range countries {
+		if !supportedCountries[c] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func IsValidLanguageCode(lang string) bool {
+	supportedLanguages := sliceToMap(plaidSupportedLanguages)
+	return supportedLanguages[lang]
+}
 
 func main() {
 	log.SetFlags(0)
@@ -53,6 +84,41 @@ func main() {
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_", ".", "_"))
 	viper.AutomaticEnv()
 
+	tag, err := locale.Detect()
+	if err != nil {
+		tag = language.AmericanEnglish
+	}
+
+	region, _ := tag.Region()
+	base, _ := tag.Base()
+
+	var country string
+	if region.IsCountry() {
+		country = region.String()
+	} else {
+		country = "US"
+	}
+
+	lang := base.String()
+
+	viper.SetDefault("plaid.countries", []string{country})
+	countriesOpt := viper.GetStringSlice("plaid.countries")
+	var countries []string
+	for _, c := range countriesOpt {
+		countries = append(countries, strings.ToUpper(c))
+	}
+
+	viper.SetDefault("plaid.language", lang)
+	lang = viper.GetString("plaid.language")
+
+	if !AreValidCountries(countries) {
+		log.Fatalln("⚠️  Invalid countries. Please configure `plaid.countries` (using an envvar, PLAID_COUNTRIES, or in plaid-cli's config file) to a subset of countries that Plaid supports. Plaid supports the following countries: ", plaidSupportedCountries)
+	}
+
+	if !IsValidLanguageCode(lang) {
+		log.Fatalln("⚠️  Invalid language code. Please configure `plaid.language` (using an envvar, PLAID_LANGUAGE, or in plaid-cli's config file) to a language that Plaid supports. Plaid supports the following languages: ", plaidSupportedLanguages)
+	}
+
 	viper.SetDefault("plaid.environment", "development")
 	plaidEnvStr := strings.ToLower(viper.GetString("plaid.environment"))
 
@@ -69,7 +135,6 @@ func main() {
 	opts := plaid.ClientOptions{
 		viper.GetString("plaid.client_id"),
 		viper.GetString("plaid.secret"),
-		viper.GetString("plaid.public_key"),
 		plaidEnv,
 		&http.Client{},
 	}
@@ -80,7 +145,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	linker := plaid_cli.NewLinker(data, client, opts)
+	linker := plaid_cli.NewLinker(data, client, countries, lang)
 
 	linkCommand := &cobra.Command{
 		Use:   "link [ITEM-ID-OR-ALIAS]",
@@ -102,13 +167,18 @@ func main() {
 					itemOrAlias = itemID
 				}
 
-				tokenPair, err = linker.Relink(itemOrAlias, port)
+				err = linker.Relink(itemOrAlias, port)
+				log.Println("Institution relinked!")
+				return
 			} else {
 				tokenPair, err = linker.Link(port)
+				if err != nil {
+					log.Fatalln(err)
+				}
+				data.Tokens[tokenPair.ItemID] = tokenPair.AccessToken
+				err = data.Save()
 			}
 
-			data.Tokens[tokenPair.ItemID] = tokenPair.AccessToken
-			err = data.Save()
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -334,7 +404,7 @@ func main() {
 					IncludeOptionalMetadata: withOptionalMetadataFlag,
 					IncludeStatus:           withStatusFlag,
 				}
-				resp, err := client.GetInstitutionByIDWithOptions(instID, opts)
+				resp, err := client.GetInstitutionByIDWithOptions(instID, countries, opts)
 				if err != nil {
 					return err
 				}
@@ -374,9 +444,10 @@ Configuration:
   plaid-cli will look at the following environment variables for API credentials:
   
     PLAID_CLIENT_ID=<client id>
-    PLAID_PUBLIC_KEY=<public key>
     PLAID_SECRET=<devlopment secret>
     PLAID_ENVIRONMENT=development
+    PLAID_LANGUAGE=en  # optional, detected using system's locale
+    PLAID_COUNTRIES=US # optional, detected using system's locale
   
   I recommend setting and exporting these on shell startup.
   
@@ -385,7 +456,6 @@ Configuration:
   
     [plaid]
     client_id = "<client id>"
-    public_key = "<public key>"
     secret = "<development secret>"
     environment = "development"
   
@@ -413,11 +483,6 @@ Configuration:
 	}
 	if !viper.IsSet("plaid.secret") {
 		log.Println("⚠️ PLAID_SECRET not set. Please see the configuration instructions below.")
-		rootCommand.Help()
-		os.Exit(1)
-	}
-	if !viper.IsSet("plaid.public_key") {
-		log.Println("⚠️ PLAID_PUBLIC_KEY not set. Please see the configuration instructions below.")
 		rootCommand.Help()
 		os.Exit(1)
 	}
@@ -455,16 +520,10 @@ func WithRelinkOnAuthError(itemID string, data *plaid_cli.Data, linker *plaid_cl
 		if e.ErrorCode == "ITEM_LOGIN_REQUIRED" {
 			log.Println("Login expired. Relinking...")
 
-			// TODO: this relink logic duplicated from the link command above
-
 			port := viper.GetString("link.port")
 
-			var tokenPair *plaid_cli.TokenPair
+			err = linker.Relink(itemID, port)
 
-			tokenPair, err = linker.Relink(itemID, port)
-
-			data.Tokens[tokenPair.ItemID] = tokenPair.AccessToken
-			err = data.Save()
 			if err != nil {
 				return err
 			}

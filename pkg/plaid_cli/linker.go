@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"text/template"
 
 	"github.com/plaid/plaid-go/plaid"
@@ -12,11 +13,13 @@ import (
 )
 
 type Linker struct {
-	Results    chan string
-	Errors     chan error
-	Client     *plaid.Client
-	ClientOpts plaid.ClientOptions
-	Data       *Data
+	Results       chan string
+	RelinkResults chan bool
+	Errors        chan error
+	Client        *plaid.Client
+	Data          *Data
+	countries     []string
+	lang          string
 }
 
 type TokenPair struct {
@@ -24,25 +27,52 @@ type TokenPair struct {
 	AccessToken string
 }
 
-func (l *Linker) Relink(itemID string, port string) (*TokenPair, error) {
+func (l *Linker) Relink(itemID string, port string) error {
 	token := l.Data.Tokens[itemID]
-	res, err := l.Client.CreatePublicToken(token)
+	hostname, err := os.Hostname()
 	if err != nil {
-		return nil, err
+		log.Fatal(err)
 	}
-
-	return l.link(port, handleRelink(l, res.PublicToken))
+	resp, err := l.Client.CreateLinkToken(plaid.LinkTokenConfigs{
+		User: &plaid.LinkTokenUser{
+			ClientUserID: hostname,
+		},
+		ClientName:   "plaid-cli",
+		CountryCodes: l.countries,
+		Language:     l.lang,
+		AccessToken:  token,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	return l.relink(port, resp.LinkToken)
 }
 
 func (l *Linker) Link(port string) (*TokenPair, error) {
-	return l.link(port, handleLink(l))
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Fatal(err)
+	}
+	resp, err := l.Client.CreateLinkToken(plaid.LinkTokenConfigs{
+		User: &plaid.LinkTokenUser{
+			ClientUserID: hostname,
+		},
+		ClientName:   "plaid-cli",
+		Products:     []string{"transactions"},
+		CountryCodes: l.countries,
+		Language:     l.lang,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	return l.link(port, resp.LinkToken)
 }
 
-func (l *Linker) link(port string, serveLink func(w http.ResponseWriter, r *http.Request)) (*TokenPair, error) {
+func (l *Linker) link(port string, linkToken string) (*TokenPair, error) {
 	log.Println(fmt.Sprintf("Starting Plaid Link on port %s...", port))
 
 	go func() {
-		http.HandleFunc("/link", serveLink)
+		http.HandleFunc("/link", handleLink(l, linkToken))
 		err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil)
 		if err != nil {
 			l.Errors <- err
@@ -57,6 +87,7 @@ func (l *Linker) link(port string, serveLink func(w http.ResponseWriter, r *http
 	case err := <-l.Errors:
 		return nil, err
 	case publicToken := <-l.Results:
+
 		res, err := l.exchange(publicToken)
 		if err != nil {
 			return nil, err
@@ -71,41 +102,54 @@ func (l *Linker) link(port string, serveLink func(w http.ResponseWriter, r *http
 	}
 }
 
+func (l *Linker) relink(port string, linkToken string) error {
+	log.Println(fmt.Sprintf("Starting Plaid Link on port %s...", port))
+
+	go func() {
+		http.HandleFunc("/relink", handleRelink(l, linkToken))
+		err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil)
+		if err != nil {
+			l.Errors <- err
+		}
+	}()
+
+	url := fmt.Sprintf("http://localhost:%s/relink", port)
+	log.Println(fmt.Sprintf("Your browser should open automatically. If it doesn't, please visit %s to continue linking!", url))
+	open.Run(url)
+
+	select {
+	case err := <-l.Errors:
+		return err
+	case <-l.RelinkResults:
+		return nil
+	}
+}
+
 func (l *Linker) exchange(publicToken string) (plaid.ExchangePublicTokenResponse, error) {
 	return l.Client.ExchangePublicToken(publicToken)
 }
 
-func NewLinker(data *Data, client *plaid.Client, clientOpts plaid.ClientOptions) *Linker {
+func NewLinker(data *Data, client *plaid.Client, countries []string, lang string) *Linker {
 	return &Linker{
-		Results:    make(chan string),
-		Errors:     make(chan error),
-		Client:     client,
-		ClientOpts: clientOpts,
-		Data:       data,
+		Results:       make(chan string),
+		RelinkResults: make(chan bool),
+		Errors:        make(chan error),
+		Client:        client,
+		Data:          data,
+		countries:     countries,
+		lang:          lang,
 	}
 }
 
-func handleLink(linker *Linker) func(w http.ResponseWriter, r *http.Request) {
+func handleLink(linker *Linker, linkToken string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			t := template.New("link")
 			t, _ = t.Parse(linkTemplate)
 
-			var env string
-			switch linker.ClientOpts.Environment {
-			case plaid.Development:
-				env = "development"
-			case plaid.Production:
-				env = "production"
-			case plaid.Sandbox:
-				env = "sandbox"
-			default:
-				env = "development"
-			}
 			d := LinkTmplData{
-				PublicKey:   linker.ClientOpts.PublicKey,
-				Environment: env,
+				LinkToken: linkToken,
 			}
 			t.Execute(w, d)
 		case http.MethodPost:
@@ -125,47 +169,31 @@ func handleLink(linker *Linker) func(w http.ResponseWriter, r *http.Request) {
 }
 
 type LinkTmplData struct {
-	PublicKey   string
-	Environment string
+	LinkToken string
 }
 
 type RelinkTmplData struct {
-	PublicToken string
-	PublicKey   string
-	Environment string
+	LinkToken string
 }
 
-func handleRelink(linker *Linker, publicToken string) func(w http.ResponseWriter, r *http.Request) {
+func handleRelink(linker *Linker, linkToken string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			t := template.New("relink")
 			t, _ = t.Parse(relinkTemplate)
 
-			var env string
-			switch linker.ClientOpts.Environment {
-			case plaid.Development:
-				env = "development"
-			case plaid.Production:
-				env = "production"
-			case plaid.Sandbox:
-				env = "sandbox"
-			default:
-				env = "development"
-			}
 			d := RelinkTmplData{
-				PublicToken: publicToken,
-				PublicKey:   linker.ClientOpts.PublicKey,
-				Environment: env,
+				LinkToken: linkToken,
 			}
 			t.Execute(w, d)
 		case http.MethodPost:
 			r.ParseForm()
-			token := r.Form.Get("public_token")
-			if token != "" {
-				linker.Results <- token
+			err := r.Form.Get("error")
+			if err != "" {
+				linker.Errors <- errors.New(err)
 			} else {
-				linker.Errors <- errors.New("Empty public_token")
+				linker.RelinkResults <- true
 			}
 
 			fmt.Fprintf(w, "ok")
@@ -179,19 +207,19 @@ var linkTemplate string = `<html>
   <head>
     <style>
     .alert-success {
-        font-size: 1.2em;
-        font-family: Arial, Helvetica, sans-serif;
-        background-color: #008000;
-        color: #fff;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        border-radius: 15px;
-        width: 100%;
-        height: 100%;
+	font-size: 1.2em;
+	font-family: Arial, Helvetica, sans-serif;
+	background-color: #008000;
+	color: #fff;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	border-radius: 15px;
+	width: 100%;
+	height: 100%;
     }
     .hidden {
-        visibility: hidden;
+	visibility: hidden;
     }
     </style>
   </head>
@@ -201,52 +229,28 @@ var linkTemplate string = `<html>
     <script type="text/javascript">
      (function($) {
        var handler = Plaid.create({
-         clientName: 'plaid-cli',
-         // Optional, specify an array of ISO-3166-1 alpha-2 country
-         // codes to initialize Link; European countries will have GDPR
-         // consent panel
-         countryCodes: ['US'],
-         env: '{{ .Environment }}',
-         // Replace with your public_key from the Dashboard
-         key: '{{ .PublicKey }}',
-         product: ['transactions'],
-         // Optional, specify a language to localize Link
-         language: 'en',
-         onLoad: function() {
-           // Optional, called when Link loads
-         },
-         onSuccess: function(public_token, metadata) {
-           // Send the public_token to your app server.
-           // The metadata object contains info about the institution the
-           // user selected and the account ID or IDs, if the
-           // Select Account view is enabled.
-           $.post('/link', {
-             public_token: public_token,
-           });
-         },
-         onExit: function(err, metadata) {
-           // The user exited the Link flow.
-           if (err != null) {
-             // The user encountered a Plaid API error prior to exiting.
-           }
-           // metadata contains information about the institution
-           // that the user selected and the most recent API request IDs.
-           // Storing this information can be helpful for support.
+	 token: '{{ .LinkToken }}',
+	 onSuccess: function(public_token, metadata) {
+	   // Send the public_token to your app server.
+	   // The metadata object contains info about the institution the
+	   // user selected and the account ID or IDs, if the
+	   // Select Account view is enabled.
+	   $.post('/link', {
+	     public_token: public_token,
+	   });
+	   document.getElementById("alert").classList.remove("hidden");
+	 },
+	 onExit: function(err, metadata) {
+	   // The user exited the Link flow.
+	   if (err != null) {
+	     // The user encountered a Plaid API error prior to exiting.
+	   }
+	   // metadata contains information about the institution
+	   // that the user selected and the most recent API request IDs.
+	   // Storing this information can be helpful for support.
 
-           document.getElementById("alert").classList.remove("hidden");
-         },
-         onEvent: function(eventName, metadata) {
-           // Optionally capture Link flow events, streamed through
-           // this callback as your users connect an Item to Plaid.
-           // For example:
-           // eventName = "TRANSITION_VIEW"
-           // metadata  = {
-           //   link_session_id: "123-abc",
-           //   mfa_type:        "questions",
-           //   timestamp:       "2017-09-14T14:42:19.350Z",
-           //   view_name:       "MFA",
-           // }
-         }
+	   document.getElementById("alert").classList.remove("hidden");
+	 }
        });
 
        handler.open();
@@ -256,8 +260,8 @@ var linkTemplate string = `<html>
 
     <div id="alert" class="alert-success hidden">
       <div>
-        <h2>All done here!</h2>
-        <p>You can close this window and go back to plaid-cli.</p>
+	<h2>All done here!</h2>
+	<p>You can close this window and go back to plaid-cli.</p>
       </div>
     </div>
   </body>
@@ -267,19 +271,19 @@ var relinkTemplate string = `<html>
   <head>
     <style>
     .alert-success {
-        font-size: 1.2em;
-        font-family: Arial, Helvetica, sans-serif;
-        background-color: #008000;
-        color: #fff;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        border-radius: 15px;
-        width: 100%;
-        height: 100%;
+	font-size: 1.2em;
+	font-family: Arial, Helvetica, sans-serif;
+	background-color: #008000;
+	color: #fff;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	border-radius: 15px;
+	width: 100%;
+	height: 100%;
     }
     .hidden {
-        visibility: hidden;
+	visibility: hidden;
     }
     </style>
   </head>
@@ -289,56 +293,28 @@ var relinkTemplate string = `<html>
     <script type="text/javascript">
      (function($) {
        var handler = Plaid.create({
-         clientName: 'plaid-cli',
-         // Optional, specify an array of ISO-3166-1 alpha-2 country
-         // codes to initialize Link; European countries will have GDPR
-         // consent panel
-         countryCodes: ['US'],
-         env: '{{ .Environment }}',
-         // Replace with your public_key from the Dashboard
-         key: '{{ .PublicKey }}',
-         product: ['transactions'],
-         token: "{{ .PublicToken }}",
-         language: 'en',
-         onLoad: function() {
-           // Optional, called when Link loads
-         },
-         onSuccess: function(public_token, metadata) {
-           console.log("onSuccess");
-           // Send the public_token to your app server.
-           // The metadata object contains info about the institution the
-           // user selected and the account ID or IDs, if the
-           // Select Account view is enabled.
-           $.post('/link', {
-             public_token: public_token,
-           });
-         },
-         onExit: function(err, metadata) {
-           if (err != null) {
-             console.log(err);
+	 token: '{{ .LinkToken }}',
+	 onSuccess: (public_token, metadata) => {
+	   // You do not need to repeat the /item/public_token/exchange
+	   // process when a user uses Link in update mode.
+	   // The Item's access_token has not changed.
+	 },
+	 onExit: function(err, metadata) {
+	   if (err != null) {
+	     $.post('/relink', {
+	       error: err
+	     });
+	   } else {
+	     $.post('/relink', {
+	       error: null
+	     });
+	   }
+	   // metadata contains information about the institution
+	   // that the user selected and the most recent API request IDs.
+	   // Storing this information can be helpful for support.
 
-             // Handle manual relink when credential is already valid
-             if (err.error_code == "item-no-error") {
-               $.post('/link', {
-                 public_token: "{{ .PublicToken }}",
-               });
-             }
-           }
-
-           document.getElementById("alert").classList.remove("hidden");
-         },
-         onEvent: function(eventName, metadata) {
-           // Optionally capture Link flow events, streamed through
-           // this callback as your users connect an Item to Plaid.
-           // For example:
-           // eventName = "TRANSITION_VIEW"
-           // metadata  = {
-           //   link_session_id: "123-abc",
-           //   mfa_type:        "questions",
-           //   timestamp:       "2017-09-14T14:42:19.350Z",
-           //   view_name:       "MFA",
-           // }
-         }
+	   document.getElementById("alert").classList.remove("hidden");
+	 }
        });
 
        handler.open();
@@ -348,8 +324,8 @@ var relinkTemplate string = `<html>
 
     <div id="alert" class="alert-success hidden">
       <div>
-        <h2>All done here!</h2>
-        <p>You can close this window and go back to plaid-cli.</p>
+	<h2>All done here!</h2>
+	<p>You can close this window and go back to plaid-cli.</p>
       </div>
     </div>
   </body>
